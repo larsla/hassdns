@@ -1,0 +1,46 @@
+os:
+  - linux
+language: go
+go:
+  - '1.11'
+
+env:
+  - GO111MODULE=on VERSION=0.1.${TRAVIS_BUILD_NUMBER}
+
+branches:
+  only:
+    - master
+
+cache:
+  directories:
+    - "$HOME/google-cloud-sdk/"
+
+before_script:
+  - gcloud version || true
+  - if [ ! -d "$HOME/google-cloud-sdk/bin" ]; then rm -rf $HOME/google-cloud-sdk; export
+    CLOUDSDK_CORE_DISABLE_PROMPTS=1; curl https://sdk.cloud.google.com | bash; fi >/dev/null 1>/dev/null
+  - source /home/travis/google-cloud-sdk/path.bash.inc
+  - gcloud version
+  - openssl aes-256-cbc -K $encrypted_b0fa6bb1b219_key -iv $encrypted_b0fa6bb1b219_iv -in service-account.json.enc -out service-account.json -d
+  - gcloud auth activate-service-account --key-file=service-account.json
+  - gcloud --quiet config set project hass-wtf
+  - rm service-account.json
+
+script:
+  - go test -v
+  - go generate version.go
+  - mkdir artifacts
+  - GOOS=linux GOARCH=amd64 go build -o artifacts/hassdns-${VERSION}-amd64 cmd/hassdns/main.go
+  - GOOS=linux GOARCH=386 go build -o artifacts/hassdns-${VERSION}-i386 cmd/hassdns/main.go
+  - GOOS=linux GOARCH=arm GOARM=6 go build -o artifacts/hassdns-${VERSION}-armhf cmd/hassdns/main.go
+  - gcloud functions deploy update --entry-point Update --runtime go111 --trigger-http
+    --set-env-vars=DOMAIN=hass.wtf
+
+deploy:
+  provider: gcs
+  access_key_id: GOOGECPS4FOZ7MJ53MRA
+  secret_access_key:
+    secure: nX2Rj8KkckVSJMpdYVMPydThccsNi4DzRVjmX03QtvYNKudY+LEfNG4GEsVbFnFxtFwZRPXOUzmMZo74L7oBPwZD0Ziv6lqdLnL6rjFqDIwuwzw5PM46SWJhtH7yDjnQQ7E3gnuGag410E01/duFyoKpiwdT+CPKtQHrAVFnSVlN2HUZkSeI3lwgwUrEMTbvR6S3IZBI42gbrxwVuuUCYceTrAlf4o21wnwalnwPfivUgOG8dO5rwkPwF1OgcolRyxZ9kUB1NwpOiKdGx4Q5qHpo1JBeeyjthH6FKSK4Bip4f1EZA0KaSKHPRtDSUpWc50Z89nr1z/ltUv+MO/ZP8QjdhYCz2vcIK0fPMQtABec2HWrQoaOJUFTHBp94jXUG4dEWfn4xDkbOQ5YhslfUaryvmCyeykdID8Aw3c73DpQMTwbl/QSWDX7YyqOxThnXTPwJMaCk7wDRYkTgJiNSpm1FoKt4wlRS46GsZSDp34RrVTR/LxAPPyS0eIblBwDDMWVCBUky7pg1gBeiFnzX7sI/Ox8vpMHAhJu9aCIR+3lzU70WtpKd0JihBzaVp1Gv48zz3RgYuVOGaVCGktKz6V/b1rUOWbaJcQ56cUYgPakZXbFS9fMmBDevOeVLEdhakP6VQHmthQ72kgTwbdD2Izaratjo3gQ73OKgJFXEJGI=
+  bucket: hassdns-artifacts
+  local-dir: artifacts
+  skip_cleanup: true
